@@ -1,0 +1,45 @@
+{
+  "name": "p0-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for the Project 0 (P0) Solana credit protocol — query banks, strategies, wallet holdings, and idle-capital opportunities from any MCP-compatible client.",
+  "type": "module",
+  "bin": {
+    "p0-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "solana",
+    "defi",
+    "project-0",
+    "p0",
+    "lending",
+    "yield",
+    "claude",
+    "agent"
+  ],
+  "author": "drew-dot-com",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.0"
+  }
+}
