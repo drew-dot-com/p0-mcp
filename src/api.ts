@@ -14,7 +14,12 @@ export type Bank = {
   deposit_apy: number;
   borrow_apy: number;
   usd_price: number;
-  token_program: string;
+  market?: string;
+  // marginfi risk weights (used for health / margin math)
+  asset_weight_init: number;
+  asset_weight_maint: number;
+  liability_weight_init: number;
+  liability_weight_maint: number;
 };
 
 /** A single supply/borrow strategy leg as returned in each category array. */

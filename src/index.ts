@@ -278,6 +278,161 @@ server.tool(
 );
 
 // ---------------------------------------------------------------------------
+// Tool 5: preview_position  (the read-only half of a trade flow)
+// ---------------------------------------------------------------------------
+
+const legSchema = z.object({
+  symbol: z.string().describe("Token symbol, e.g. 'mSOL', 'USDC', 'SOL'."),
+  usd_amount: z
+    .number()
+    .positive()
+    .describe("USD value of this leg of the position."),
+});
+
+server.tool(
+  "preview_position",
+  "Simulate a hypothetical P0 position WITHOUT executing anything — the " +
+    "read-only half of a trade flow. Given a set of deposits and optional " +
+    "borrows, returns the resulting account health computed from P0's own " +
+    "published marginfi risk weights (asset_weight_init/maint, " +
+    "liability_weight_init/maint), the projected net annual yield, and " +
+    "remaining borrow capacity. No wallet, no keys, no signing. NOTE: this " +
+    "evaluates a hypothetical position in isolation — it does NOT read your " +
+    "live on-chain positions (use the `mfi` CLI for those).",
+  {
+    deposits: z
+      .array(legSchema)
+      .min(1)
+      .describe("Assets to supply as collateral."),
+    borrows: z
+      .array(legSchema)
+      .optional()
+      .describe("Assets to borrow against the collateral (optional)."),
+  },
+  async ({ deposits, borrows = [] }) => {
+    const banks = await getBanks();
+
+    // Best deposit bank per symbol (highest deposit APY).
+    const bestDeposit = new Map<string, Bank>();
+    for (const b of banks) {
+      const key = b.symbol.toUpperCase();
+      const cur = bestDeposit.get(key);
+      if (!cur || b.deposit_apy > cur.deposit_apy) bestDeposit.set(key, b);
+    }
+    // Borrows are only valid on P0-venue banks; pick the cheapest.
+    const bestBorrow = new Map<string, Bank>();
+    for (const b of banks) {
+      if (b.venue !== "P0") continue;
+      const key = b.symbol.toUpperCase();
+      const cur = bestBorrow.get(key);
+      if (!cur || b.borrow_apy < cur.borrow_apy) bestBorrow.set(key, b);
+    }
+
+    const problems: string[] = [];
+
+    let weightedCollateralInit = 0;
+    let weightedCollateralMaint = 0;
+    let grossSupplyYieldUsd = 0;
+    let totalDepositUsd = 0;
+    const depositLegs = deposits.map((d) => {
+      const bank = bestDeposit.get(d.symbol.toUpperCase());
+      if (!bank) {
+        problems.push(`No P0 bank found for deposit asset '${d.symbol}'.`);
+        return { ...d, eligible: false };
+      }
+      weightedCollateralInit += d.usd_amount * bank.asset_weight_init;
+      weightedCollateralMaint += d.usd_amount * bank.asset_weight_maint;
+      grossSupplyYieldUsd += (d.usd_amount * bank.deposit_apy) / 100;
+      totalDepositUsd += d.usd_amount;
+      return {
+        symbol: bank.symbol,
+        usd_amount: d.usd_amount,
+        venue: bank.venue,
+        deposit_apy: bank.deposit_apy,
+        asset_weight_init: bank.asset_weight_init,
+        asset_weight_maint: bank.asset_weight_maint,
+        eligible: true,
+      };
+    });
+
+    let weightedLiabInit = 0;
+    let weightedLiabMaint = 0;
+    let borrowCostUsd = 0;
+    let totalBorrowUsd = 0;
+    const borrowLegs = borrows.map((b) => {
+      const bank = bestBorrow.get(b.symbol.toUpperCase());
+      if (!bank) {
+        problems.push(
+          `Cannot borrow '${b.symbol}' — borrowing is only available on P0-venue banks and none was found for this symbol.`,
+        );
+        return { ...b, eligible: false };
+      }
+      weightedLiabInit += b.usd_amount * bank.liability_weight_init;
+      weightedLiabMaint += b.usd_amount * bank.liability_weight_maint;
+      borrowCostUsd += (b.usd_amount * bank.borrow_apy) / 100;
+      totalBorrowUsd += b.usd_amount;
+      return {
+        symbol: bank.symbol,
+        usd_amount: b.usd_amount,
+        borrow_apy: bank.borrow_apy,
+        liability_weight_init: bank.liability_weight_init,
+        liability_weight_maint: bank.liability_weight_maint,
+        eligible: true,
+      };
+    });
+
+    const freeCollateralInit = weightedCollateralInit - weightedLiabInit;
+    const canOpen = freeCollateralInit >= 0;
+    const maintHealthRatio =
+      weightedLiabMaint > 0
+        ? weightedCollateralMaint / weightedLiabMaint
+        : null; // no borrows → not liquidatable
+    const liquidatable =
+      weightedLiabMaint > 0 && weightedCollateralMaint < weightedLiabMaint;
+
+    const netAnnualYieldUsd = grossSupplyYieldUsd - borrowCostUsd;
+    const equityUsd = totalDepositUsd - totalBorrowUsd;
+    const netApyOnEquity =
+      equityUsd > 0 ? (netAnnualYieldUsd / equityUsd) * 100 : null;
+
+    const headline =
+      problems.length > 0
+        ? `Position cannot be fully evaluated: ${problems.join(" ")}`
+        : !canOpen
+          ? `This position cannot be opened — borrows exceed initial-margin collateral by $${round(-freeCollateralInit, 2).toLocaleString()} (weighted).`
+          : borrows.length === 0
+            ? `Supplying $${round(totalDepositUsd, 2).toLocaleString()} earns ~$${round(netAnnualYieldUsd, 2).toLocaleString()}/yr. No borrows, so no liquidation risk.`
+            : `Position opens OK. Net yield ~$${round(netAnnualYieldUsd, 2).toLocaleString()}/yr on $${round(equityUsd, 2).toLocaleString()} equity (${netApyOnEquity?.toFixed(1)}% APY). Maintenance health ratio ${maintHealthRatio?.toFixed(2)} (>1.0 = safe; liquidation at 1.0).`;
+
+    return jsonResult({
+      headline,
+      can_open: canOpen,
+      liquidatable,
+      maintenance_health_ratio: maintHealthRatio,
+      free_collateral_init_usd: round(freeCollateralInit, 2),
+      totals: {
+        total_deposit_usd: round(totalDepositUsd, 2),
+        total_borrow_usd: round(totalBorrowUsd, 2),
+        equity_usd: round(equityUsd, 2),
+        gross_supply_yield_usd_per_yr: round(grossSupplyYieldUsd, 2),
+        borrow_cost_usd_per_yr: round(borrowCostUsd, 2),
+        net_annual_yield_usd: round(netAnnualYieldUsd, 2),
+        net_apy_on_equity_pct:
+          netApyOnEquity === null ? null : round(netApyOnEquity, 2),
+      },
+      deposits: depositLegs,
+      borrows: borrowLegs,
+      problems,
+      caveats: [
+        "Hypothetical position evaluated in isolation; does not include your existing on-chain positions.",
+        "Health uses current oracle prices and risk weights; real liquidation depends on live prices, e-mode, and deposit/borrow caps not modeled here.",
+        "Borrowing is only available on P0-venue banks.",
+      ],
+    });
+  },
+);
+
+// ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
 
