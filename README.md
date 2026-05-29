@@ -23,31 +23,44 @@ capabilities to every other agent client — so this server is the
 | `get_strategies`    | Top pre-computed rate-arbitrage and looping strategies, sorted by projected APY.                             |
 | `analyze_wallet`    | Take a Solana wallet address, return holdings + best deposit APY per token + projected annual yield in USD.  |
 | `find_idle_capital` | Opinionated "you're leaving $X/yr on the table" breakdown — surfaces the single highest-impact action first. |
+| `preview_position`  | Simulate a hypothetical deposit/borrow position — health factor, liquidation risk, net yield — from P0's published risk weights. Read-only, no signing. |
 
 All tools hit P0's public APIs at `https://ai.0.xyz` — no auth, no keypair.
 
-## Install — Claude Desktop
+## Install
 
-Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (Mac)
-or the equivalent on your OS:
+Clone and build:
+
+```bash
+git clone https://github.com/drew-dot-com/p0-mcp.git
+cd p0-mcp
+pnpm install   # or npm install
+pnpm build     # compiles to dist/index.js
+```
+
+Then register it with your MCP client. For **Claude Desktop**, add to
+`~/Library/Application Support/Claude/claude_desktop_config.json` (Mac) or the
+equivalent on your OS, pointing at the built file:
 
 ```json
 {
   "mcpServers": {
     "p0": {
-      "command": "npx",
-      "args": ["-y", "p0-mcp"]
+      "command": "node",
+      "args": ["/absolute/path/to/p0-mcp/dist/index.js"]
     }
   }
 }
 ```
 
-Restart Claude Desktop. You should see the P0 tools available in the tools menu.
+Fully quit and reopen Claude Desktop. The five P0 tools should appear in the
+tools menu.
 
-## Install — Cursor / Cline / others
+**Cursor / Cline / Zed / others** accept the same stdio config — see your
+client's docs for where its MCP server registry lives.
 
-Most MCP clients accept the same stdio config. See your client's docs for the
-exact location of the MCP server registry.
+> Once published to npm, install will simplify to a one-liner
+> (`"command": "npx", "args": ["-y", "p0-mcp"]`). For now, build from source.
 
 ## Try it
 
@@ -57,13 +70,14 @@ Once installed, ask your agent things like:
 - _"What's the cheapest stablecoin I can borrow on P0?"_
 - _"Analyze this wallet: `<address>` — what would they earn if they deposited everything on P0?"_
 - _"How much yearly yield is wallet `<address>` leaving on the table?"_
+- _"Preview depositing $1,000 of mSOL and borrowing $400 of USDC — is it safe?"_
 
 ## Local development
 
 ```bash
 pnpm install
-pnpm dev   # runs against stdio — connect from a local MCP client
-pnpm build # compile to dist/
+pnpm dev    # run from source over stdio
+pnpm build  # compile to dist/
 ```
 
 ## License
