@@ -383,7 +383,14 @@ server.tool(
 
     const freeCollateralInit = weightedCollateralInit - weightedLiabInit;
     const canOpen = freeCollateralInit >= 0;
-    const maintHealthRatio =
+    // marginfi-style maintenance health factor: (weighted_assets - weighted_liabs)
+    // / weighted_assets. 1.0 (100%) = no debt; 0.0 = at liquidation; <0 = liquidatable.
+    const healthFactorMaint =
+      weightedCollateralMaint > 0
+        ? (weightedCollateralMaint - weightedLiabMaint) / weightedCollateralMaint
+        : null;
+    // Secondary, intuitive view: how many times collateral covers debt (>1 = safe).
+    const collateralCoverageRatio =
       weightedLiabMaint > 0
         ? weightedCollateralMaint / weightedLiabMaint
         : null; // no borrows → not liquidatable
@@ -402,13 +409,15 @@ server.tool(
           ? `This position cannot be opened — borrows exceed initial-margin collateral by $${round(-freeCollateralInit, 2).toLocaleString()} (weighted).`
           : borrows.length === 0
             ? `Supplying $${round(totalDepositUsd, 2).toLocaleString()} earns ~$${round(netAnnualYieldUsd, 2).toLocaleString()}/yr. No borrows, so no liquidation risk.`
-            : `Position opens OK. Net yield ~$${round(netAnnualYieldUsd, 2).toLocaleString()}/yr on $${round(equityUsd, 2).toLocaleString()} equity (${netApyOnEquity?.toFixed(1)}% APY). Maintenance health ratio ${maintHealthRatio?.toFixed(2)} (>1.0 = safe; liquidation at 1.0).`;
+            : `Position opens OK. Net yield ~$${round(netAnnualYieldUsd, 2).toLocaleString()}/yr on $${round(equityUsd, 2).toLocaleString()} equity (${netApyOnEquity?.toFixed(1)}% APY). Maintenance health factor ${((healthFactorMaint ?? 0) * 100).toFixed(1)}% (0% = liquidation); collateral covers debt ${collateralCoverageRatio?.toFixed(2)}x.`;
 
     return jsonResult({
       headline,
       can_open: canOpen,
       liquidatable,
-      maintenance_health_ratio: maintHealthRatio,
+      // (weighted_assets_maint - weighted_liabs_maint) / weighted_assets_maint
+      health_factor_maint: healthFactorMaint,
+      collateral_coverage_ratio: collateralCoverageRatio,
       free_collateral_init_usd: round(freeCollateralInit, 2),
       totals: {
         total_deposit_usd: round(totalDepositUsd, 2),
@@ -424,8 +433,11 @@ server.tool(
       borrows: borrowLegs,
       problems,
       caveats: [
-        "Hypothetical position evaluated in isolation; does not include your existing on-chain positions.",
-        "Health uses current oracle prices and risk weights; real liquidation depends on live prices, e-mode, and deposit/borrow caps not modeled here.",
+        "Hypothetical position evaluated in isolation; does not include your existing on-chain positions (use the `mfi` CLI for live account health).",
+        "Uses mid oracle price (usd_price). marginfi applies conservative price confidence bands (low bound for collateral, high for liabilities), so on-chain health will read slightly tighter than this preview.",
+        "Does not apply e-mode: correlated collateral/borrow pairs (e.g. SOL/LSTs) get more favorable weights on-chain, so this preview is conservative for those.",
+        "Picks the best-APY deposit bank and cheapest P0 borrow bank per symbol; a real position is tied to specific banks with their own weights.",
+        "Does not enforce deposit/borrow caps or bank capacity.",
         "Borrowing is only available on P0-venue banks.",
       ],
     });
