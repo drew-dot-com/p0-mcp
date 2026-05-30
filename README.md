@@ -8,12 +8,27 @@ query live P0 banks, strategies, and wallet idle-capital opportunities.
 > **v1 is read-only.** No keypair, no signing, no on-chain writes. Same
 > safety posture as P0's public HTTP APIs.
 
-## Why
+## Why an MCP server (vs. the skill)?
 
-The official P0 agent skill (`0dotxyz/p0-agents`) is great inside Claude Code,
-but it's Claude-Code-shaped. MCP is the standard way to expose the same
-capabilities to every other agent client — so this server is the
-"P0-everywhere" complement.
+The official P0 agent skill (`0dotxyz/p0-agents`) already teaches coding agents
+how to hit these APIs, and it's portable — it's just markdown, so it works in
+any harness that supports skills (Claude Code, OpenCode, Cursor, …), not only
+Claude. So for a developer in a coding agent, the skill covers the read-only
+ground.
+
+An MCP server is complementary, and earns its keep in three places:
+
+1. **Deterministic logic.** Risk math (health factor, liquidation, margin)
+   lives in tested code here, returned as structured data — rather than being
+   re-derived by the model from prose on every run. For anything financial,
+   that determinism matters.
+2. **Non-coding chat surfaces.** A skill needs an agent that can execute code
+   or shell. An MCP server plugs straight into end-user chat clients (Claude
+   Desktop, ChatGPT apps) where there is no code-execution step — the surface
+   where a consumer-facing P0 experience would actually live.
+3. **A path to interactive UI.** The MCP Apps/UI extension can render
+   confirm-and-act cards inside the chat — the missing piece for an eventual
+   in-chat trading flow (cf. Liquid's Co-Invest).
 
 ## Tools
 
